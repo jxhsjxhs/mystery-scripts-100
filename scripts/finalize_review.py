@@ -170,13 +170,16 @@ def main():
                 return line
             return line.rstrip() + '---|'
         it = re.sub(r'^\|(?:---\|)+\s*$', sepcor, it, flags=re.M)
-        # 数据行：| H01 | ... |  → 末尾追加均分/名次
+        # 数据行：| H01 | ... |  → 末尾追加/刷新均分/名次
+        # 第二轮评审名次会整体变化：若该行已带上一轮的均分/名次列，先剥掉再用新值重建，
+        # 避免「已有名次就跳过」导致旧名次残留；重复运行仍逐字节幂等。
         def addcol(m):
             line = m.group(0)
             sid = m.group(2)
             r = rmap.get(sid)
-            if not r or ' / 第' in line:
+            if not r:
                 return line
+            line = re.sub(r'\s*\|\s*[\d.]+\s*/\s*第\d+名\s*\|\s*$', '', line.rstrip())
             return line.rstrip().rstrip('|').rstrip() + ' | %.2f / 第%d名 |' % (r['avg'], r['rank'])
         it = re.sub(r'^(\|\s*([HTCO]\d{2})\s*\|[^\n]*)$', addcol, it, flags=re.M)
         open(ip, 'w', encoding='utf-8').write(it)

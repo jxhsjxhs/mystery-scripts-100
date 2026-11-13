@@ -4,9 +4,13 @@
 把 eval/PM评审总结.md 的「数据部分」同步到权威 eval/评分汇总.json，
 保留 PM agent 手写的散文、总荐语、十佳荐语、分卷观察语气与选本建议。
 
-背景：s08 最终分数在 PM 首版之后落盘，导致排名/均分变化；本脚本做确定性收口。
 用法：python3 scripts/refresh_pm.py
 幂等：重复运行产出逐字节不变（表格按 JSON 重建，标题行严格单行匹配）。
+
+通用化说明（第二轮升级后重写）：
+  不再写死任何旧数字（72.75 / 81.50 / 81.29 …），一律用正则匹配「数字」后
+  替换为当前 JSON 的值；十佳表按当前 TOP10 重建，任何新进榜本若缺手写荐语
+  则用通用荐语兜底。因此无论本轮名次怎么整体变动都能收口。
 """
 import json, re, os
 
@@ -28,26 +32,35 @@ def main():
 
     p = open(os.path.join(EV, 'PM评审总结.md'), encoding='utf-8').read()
 
-    # 一、总览 / 三、分卷观察：只替换散文里的旧数字（名次表随后整节重建，不受影响）
+    # 一、总览 / 三、分卷观察：把散文里出现的「任意旧数字」按语义替换成当前值
+    def num(sub, pattern, fmt):
+        """把 pattern 中捕获组（数字）替换为 fmt 生成的字符串。"""
+        return re.sub(pattern, lambda m: fmt(m), sub)
+
     def fix_prose(seg):
-        seg = seg.replace('最低均分 72.75', '最低均分 %.2f' % lo)
-        seg = seg.replace('全榜平均落在 81.50', '全榜平均落在 %.2f' % avg_all)
-        seg = seg.replace('恐怖本 81.29、反转本 80.48',
-                          '恐怖本 %.2f、反转本 %.2f' % (vh, vt))
-        seg = seg.replace('恐怖本平均均分 81.29', '恐怖本平均均分 %.2f' % vh)
-        seg = seg.replace('反转本平均均分 80.48', '反转本平均均分 %.2f' % vt)
-        seg = seg.replace('搞笑本平均均分 82.25', '搞笑本平均均分 %.2f' % vc)
-        seg = seg.replace('职场厮杀本平均均分 81.98', '职场厮杀本平均均分 %.2f' % vo)
+        seg = re.sub(r'(最低均分\s*)\d+\.\d+',
+                     lambda m: m.group(1) + '%.2f' % lo, seg)
+        seg = re.sub(r'(全榜平均(?:落在|为|是)?\s*)\d+\.\d+',
+                     lambda m: m.group(1) + '%.2f' % avg_all, seg)
+        seg = re.sub(r'(恐怖本\s*)\d+\.\d+(、反转本\s*)\d+\.\d+',
+                     lambda m: m.group(1) + '%.2f' % vh + m.group(2) + '%.2f' % vt, seg)
+        seg = re.sub(r'(恐怖本平均均分\s*)\d+\.\d+',
+                     lambda m: m.group(1) + '%.2f' % vh, seg)
+        seg = re.sub(r'(反转本平均均分\s*)\d+\.\d+',
+                     lambda m: m.group(1) + '%.2f' % vt, seg)
+        seg = re.sub(r'(搞笑本平均均分\s*)\d+\.\d+',
+                     lambda m: m.group(1) + '%.2f' % vc, seg)
+        seg = re.sub(r'(职场厮杀本平均均分\s*)\d+\.\d+',
+                     lambda m: m.group(1) + '%.2f' % vo, seg)
         return seg
 
     for title in ['一、评审方法与总览', '三、分卷观察']:
-        # 标题严格匹配单行；group(2) 为本节正文，整段替换
         m = re.search(r'(##[^\n]*%s[^\n]*\n)(.*?)(?=\n##|\Z)' % re.escape(title), p, re.S)
         if m:
             body = m.group(2).strip('\n')
             p = p[:m.start(2)] + '\n' + fix_prose(body).strip('\n') + '\n' + p[m.end(2):]
 
-    # 二、十佳逐本荐语：名次 1–10 用权威 TOP10；保留原名次对应的手写荐语，给新进第 10 名写一句
+    # 二、十佳逐本荐语：按当前权威 TOP10 重建，保留同名次/同编号的手写荐语
     top10 = ranked[:10]
     m = re.search(r'(##[^\n]*二、十佳逐本荐语[^\n]*\n)(.*?)(?=\n##|\Z)', p, re.S)
     if m:
@@ -57,16 +70,17 @@ def main():
             mm = re.match(r'^\|\s*(\d+)\s*\|\s*([A-Z]\d{2})\s*\|\s*《(.+?)》\s*\|\s*(.+?)\s*\|?\s*$', l)
             if mm:
                 old_praise[mm.group(2)] = mm.group(4)
-        new_praise = {'T08': '台上再搭一台戏，戏中戏层层相套，排演控可细品。'}
         header = ['| 名次 | 编号 | 剧名 | PM 荐语 |', '| --- | --- | --- | --- |']
         rows = []
         for i, r in enumerate(top10, 1):
-            praise = old_praise.get(r['sid']) or new_praise.get(r['sid']) or '一局一世界，围坐即开演，值得先翻这一本。'
+            praise = old_praise.get(r['sid'])
+            if not praise:
+                praise = '《%s》一局一世界，围坐即开演，值得先翻这一本。' % r['name']
             rows.append('| %d | %s | 《%s》 | %s |' % (i, r['sid'], r['name'], praise))
         block = '\n' + '\n'.join(header + rows) + '\n'
         p = p[:m.start(2)] + block + p[m.end(2):]
 
-    # 五、全体名次表：整节按权威 100 行重建（校验器逐行比对 JSON 的依据）；本节是末节，直接截断到标题后重建
+    # 五、全体名次表：整节按权威 100 行重建（校验器逐行比对 JSON 的依据）
     m = re.search(r'##[^\n]*五、全体名次表[^\n]*\n', p)
     if m:
         header = '| 名次 | 编号 | 剧名 | 卷 | 均分 |\n| --- | --- | --- | --- | --- |\n'

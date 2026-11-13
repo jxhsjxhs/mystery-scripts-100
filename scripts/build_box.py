@@ -112,6 +112,7 @@ def parse_vol(vol, pre):
         d['核心诡计'] = sec('核心诡计')
         d['反转点'] = sec('反转点')
         d['真相'] = sec('真相')
+        d['升级'] = sec('讨论升级')
         d['dm_notes'] = re.findall(r'^\s*(?:\d+\.|-\s+)\s*(.+)$', sec('主持人'), re.M)
         d['clues'] = [c.strip() for c in re.findall(r'^\s*\d+\.\s*(.+)$', sec('关键线索'), re.M)]
         flow = re.findall(r'-\s*(第[一二三]幕)[：:]\s*(.+)$', sec('流程'), re.M)
@@ -296,7 +297,15 @@ def clue_list(d):
 """
 
 
+def upgrade_section(d):
+    """把 `### 讨论升级 / 高光辩论` 段渲染成可独立成章的正文；无升级内容时返回空串。"""
+    if not d.get('升级'):
+        return ''
+    return '## 讨论升级 / 高光辩论（本局升级）\n\n' + d['升级'].strip() + '\n'
+
+
 def rulebook(d):
+    up = upgrade_section(d)
     return f"""# 《{d['name']}》· 游戏说明书
 
 > {d['题材']} ｜ {d['人数']} ｜ {d['时长']} ｜ 难度 {d['难度']} ｜ 写手 {d['pen']}
@@ -328,6 +337,7 @@ def rulebook(d):
 - 本类剧本为**沉浸推理 + 角色扮演**，多数无硬性「输赢」，以「是否达成个人任务」+「是否还原真相」为体验核心。
 - 完成本局任务、或投中真相/关键指认，即为本局高光；DM 可在复盘时点明各角色的暗线。
 
+{up}
 ## 常见问题
 - **Q：能把自己的秘密告诉别人吗？** 可以策略性透露，但一旦全盘托出会失去博弈空间，建议留到关键轮次。
 - **Q：线索不够怎么办？** 回到角色剧本的「你要追查」与 DM 的节奏提示，重新比对已公开线索。
@@ -342,6 +352,8 @@ def dm_manual(d):
     roles_secret = '\n'.join('- **%s**：秘密＝%s；任务＝%s' % (r['name'], r['secret'], r['goal']) for r in d['roles'])
     ct = commercial_text(d['sid'])
     pack = '\n## 〇、商业化包装（宣传 / 开本导语，无剧透）\n' + ct + '\n' if ct else ''
+    up = d.get('升级', '').strip()
+    up_ch = '\n## 十一、讨论升级 / 高光辩论（本局升级）\n' + up + '\n' if up else ''
     return f"""# 《{d['name']}》· 主持人手册（DM 专用 · 玩家勿看）
 {pack}
 ## 一、基本信息
@@ -388,7 +400,7 @@ def dm_manual(d):
 
 ## 十、物料核对
 封面 ×1 ｜ 说明书 ×1 ｜ 角色剧本 ×{d['n']} ｜ 角色卡 ×{d['n']} ｜ 线索卡 ×{len(d['clues'])} ｜ DM 手册 ×1 ｜ 结局卡 ×1
-"""
+{up_ch}"""
 
 
 def ending_card(d):
@@ -422,6 +434,10 @@ def combo(d):
     ct = commercial_text(d['sid'])
     if ct:
         parts.append('\n---\n\n## ⑥ 商业化包装（无剧透）\n' + ct)
+    up = d.get('升级', '').strip()
+    if up:
+        num = '⑦' if ct else '⑥'
+        parts.append('\n---\n\n## %s 讨论升级 / 高光辩论（本局升级）\n' % num + up)
     return '\n'.join(parts)
 
 
